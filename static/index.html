@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transcription App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin: 10px 0;
+        }
+        #transcript, #finalTranscript, #lastReturnedAudio {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-top: 20px;
+            min-height: 100px;
+        }
+        #lastReturnedAudio {
+            background-color: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Transcription App</h1>
+    <button id="startButton">Start Transcribing</button>
+    <button id="stopButton">Stop Transcribing</button>
+
+    <!-- <h2>Live Transcript:</h2>-->
+    <!--<div id="transcript"></div>-->
+
+    <h2>Last Returned Audio:</h2>
+    <div id="lastReturnedAudio"></div>
+
+    <h2>Final Transcript:</h2>
+    <div id="finalTranscript"></div>
+
+    <script>
+       let eventSource;
+
+        document.getElementById('startButton').addEventListener('click', startTranscription);
+        document.getElementById('stopButton').addEventListener('click', stopTranscription);
+
+        function startTranscription() {
+            //document.getElementById('liveTranscript').innerHTML = '';
+            document.getElementById('lastReturnedAudio').innerHTML = '';
+            document.getElementById('finalTranscript').innerHTML = '';
+
+            eventSource = new EventSource('/start_transcription');
+
+            eventSource.onmessage = function(event) {
+                const transcript = event.data;
+                //document.getElementById('liveTranscript').innerHTML += transcript + '<br>';
+                document.getElementById('lastReturnedAudio').textContent = transcript;
+            };
+
+            eventSource.onerror = function(event) {
+                console.error('EventSource failed:', event);
+                eventSource.close();
+            };
+        }
+
+        function stopTranscription() {
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            fetch('/stop_transcription')
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data);
+                    getFinalTranscript();
+                })
+                .catch(error => console.error('Error:', error));
+        }
+
+        function getFinalTranscript() {
+            fetch('/get_final_transcript')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('finalTranscript').textContent = data.transcript;
+                })
+                .catch(error => console.error('Error:', error));
+        }
+    </script>
+</body>
+</html>
