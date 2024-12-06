@@ -141,7 +141,7 @@ def start_transcription():
                 transcript = transcription_queue.get(timeout=1)
                 yield f"data: {transcript}\n\n"
             except queue.Empty:
-                pass
+                yield f"data: \n\n"  # Keep connection alive
 
     return Response(generate(), mimetype='text/event-stream')
 
