@@ -1,4 +1,5 @@
 flask
-sounddevice
+flask-cors
 websocket-client
+sounddevice
 numpy
