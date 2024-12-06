@@ -109,7 +109,76 @@ def get_auth():
     apikey = "Oogv4QFoAdBHL6kvvwnm-rOXAQfmSQFXvxHXWTGMUqfn"
     return ("apikey", apikey)
 
-# Rest of the Flask routes remain the same as in the original script
+@app.route('/')
+def index():
+    return send_from_directory(app.static_folder, 'index.html')
+
+@app.route('/start_transcription')
+def start_transcription():
+    global is_transcribing, final_transcript
+    is_transcribing = True
+    final_transcript = []  # Reset final transcript
+
+    def generate():
+        headers = {}
+        userpass = ":".join(get_auth())
+        headers["Authorization"] = "Basic " + base64.b64encode(userpass.encode()).decode()
+        url = get_url()
+
+        ws = websocket.WebSocketApp(url,
+                                    header=headers,
+                                    on_message=on_message,
+                                    on_error=on_error,
+                                    on_close=on_close)
+        ws.on_open = on_open
+        
+        wst = threading.Thread(target=ws.run_forever, kwargs={"sslopt": {"cert_reqs": ssl.CERT_NONE}})
+        wst.daemon = True
+        wst.start()
+
+        while is_transcribing:
+            try:
+                transcript = transcription_queue.get(timeout=1)
+                yield f"data: {transcript}\n\n"
+            except queue.Empty:
+                pass
+
+    return Response(generate(), mimetype='text/event-stream')
+
+@app.route('/stop_transcription')
+def stop_transcription():
+    global is_transcribing
+    is_transcribing = False
+    save_transcript()
+    return jsonify({"status": "Transcription stopped and saved"})
+
+@app.route('/get_final_transcript')
+def get_final_transcript():
+    save_transcript()  # Save any remaining transcript
+    if os.path.exists("transcript.txt"):
+        with open("transcript.txt", "r") as f:
+            transcript = f.read()
+        return jsonify({"transcript": transcript})
+    else:
+        return jsonify({"transcript": "No transcript available."})
+
+@app.route('/clear_transcript')
+def clear_transcript():
+    global final_transcript
+    final_transcript = []
+    if os.path.exists("transcript.txt"):
+        os.remove("transcript.txt")
+    return jsonify({"status": "Transcript cleared"})
+
+# default "homepage", also needed for health check by Code Engine
+@app.get('/')
+def print_default():
+    """ Greeting
+    health check
+    """
+    # returning a dict equals to use jsonify()
+    return {'message': 'This is the certifications API server'}
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=8080)
