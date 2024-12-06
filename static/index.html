@@ -1,72 +1,40 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Transcription App</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        button {
-            padding: 10px 20px;
-            font-size: 16px;
-            margin: 10px 0;
-        }
-        #transcript, #finalTranscript, #lastReturnedAudio {
-            border: 1px solid #ccc;
-            padding: 10px;
-            margin-top: 20px;
-            min-height: 100px;
-        }
-        #lastReturnedAudio {
-            background-color: #f0f0f0;
-        }
-    </style>
 </head>
 <body>
     <h1>Transcription App</h1>
-    <button id="startButton">Start Transcribing</button>
-    <button id="stopButton">Stop Transcribing</button>
-
-    <!-- <h2>Live Transcript:</h2>-->
-    <!--<div id="transcript"></div>-->
-
-    <h2>Last Returned Audio:</h2>
-    <div id="lastReturnedAudio"></div>
-
-    <h2>Final Transcript:</h2>
-    <div id="finalTranscript"></div>
+    <button id="startTranscription">Start Transcription</button>
+    <button id="stopTranscription">Stop Transcription</button>
+    <div id="transcriptDisplay"></div>
 
     <script>
-       let eventSource;
+        const startButton = document.getElementById('startTranscription');
+        const stopButton = document.getElementById('stopTranscription');
+        const transcriptDisplay = document.getElementById('transcriptDisplay');
+        let eventSource = null;
 
-        document.getElementById('startButton').addEventListener('click', startTranscription);
-        document.getElementById('stopButton').addEventListener('click', stopTranscription);
+        startButton.addEventListener('click', () => {
+            // Close any existing EventSource
+            if (eventSource) {
+                eventSource.close();
+            }
 
-        function startTranscription() {
-            //document.getElementById('liveTranscript').innerHTML = '';
-            document.getElementById('lastReturnedAudio').innerHTML = '';
-            document.getElementById('finalTranscript').innerHTML = '';
-
+            // Create new EventSource
             eventSource = new EventSource('/start_transcription');
 
             eventSource.onmessage = function(event) {
-                const transcript = event.data;
-                //document.getElementById('liveTranscript').innerHTML += transcript + '<br>';
-                document.getElementById('lastReturnedAudio').textContent = transcript;
+                transcriptDisplay.textContent += event.data + '\n';
             };
 
-            eventSource.onerror = function(event) {
-                console.error('EventSource failed:', event);
+            eventSource.onerror = function(error) {
+                console.error('EventSource failed:', error);
                 eventSource.close();
             };
-        }
+        });
 
-        function stopTranscription() {
+        stopButton.addEventListener('click', () => {
             if (eventSource) {
                 eventSource.close();
             }
@@ -74,20 +42,14 @@
             fetch('/stop_transcription')
                 .then(response => response.json())
                 .then(data => {
-                    console.log(data);
-                    getFinalTranscript();
-                })
-                .catch(error => console.error('Error:', error));
-        }
-
-        function getFinalTranscript() {
-            fetch('/get_final_transcript')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('finalTranscript').textContent = data.transcript;
-                })
-                .catch(error => console.error('Error:', error));
-        }
+                    console.log(data.status);
+                    fetch('/get_final_transcript')
+                        .then(response => response.json())
+                        .then(transcriptData => {
+                            transcriptDisplay.textContent += '\nFinal Transcript:\n' + transcriptData.transcript;
+                        });
+                });
+        });
     </script>
 </body>
 </html>
