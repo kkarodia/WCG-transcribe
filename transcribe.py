@@ -1,104 +1,25 @@
-import argparse
-import base64
-import configparser
-import json
-import threading
-import time
 import os
-import sys
-
-import sounddevice as sd
-import numpy as np
-import websocket
-from websocket._abnf import ABNF
-from flask import Flask, render_template, Response, jsonify, send_from_directory
+import json
+import base64
+import threading
 import queue
 import ssl
+import websocket
 
-app = Flask(__name__, static_folder='static')
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 
-CHUNK = 1024
-CHANNELS = 1
-RATE = 44100
-FINALS = []
-LAST = None
-
-REGION_MAP = {
-    'us-east': 'us-east.speech-to-text.watson.cloud.ibm.com',
-    'us-south': 'us-south.speech-to-text.watson.cloud.ibm.com',
-    'eu-gb': 'eu-gb.speech-to-text.watson.cloud.ibm.com',
-    'eu-de': 'eu-de.speech-to-text.watson.cloud.ibm.com',
-    'au-syd': 'au-syd.speech-to-text.watson.cloud.ibm.com',
-    'jp-tok': 'jp-tok.speech-to-text.watson.cloud.ibm.com',
-}
+app = Flask(__name__)
+CORS(app)
 
 transcription_queue = queue.Queue()
 final_transcript = []
 is_transcribing = False
 
-def read_audio(ws):
-    global is_transcribing
-    
-    def audio_callback(indata, frames, time, status):
-        if status:
-            print(status)
-        ws.send(indata.tobytes(), ABNF.OPCODE_BINARY)
-
-    try:
-        with sd.InputStream(callback=audio_callback, 
-                            channels=CHANNELS, 
-                            samplerate=RATE, 
-                            dtype='int16'):
-            while is_transcribing:
-                sd.sleep(100)
-    except Exception as e:
-        print(f"Audio input error: {e}")
-        is_transcribing = False
-
-def on_message(ws, msg):
-    global final_transcript
-    data = json.loads(msg)
-    if "results" in data:
-        transcript = data['results'][0]['alternatives'][0]['transcript']
-        print(transcript)
-        transcription_queue.put(transcript)
-        if data["results"][0]["final"]:
-            final_transcript.append(transcript)
-
-def on_error(ws, error):
-    print(f"Error occurred: {error}")
-
-def on_close(ws, close_status_code, close_msg):
-    global is_transcribing
-    is_transcribing = False
-    print(f"WebSocket closed. Status code: {close_status_code}. Close message: {close_msg}")
-    save_transcript()
-
-def save_transcript():
-    global final_transcript
-    if final_transcript:
-        with open("transcript.txt", "a") as f:
-            f.write(" ".join(final_transcript) + "\n")
-        print("Transcript appended to transcript.txt")
-        final_transcript = []
-    else:
-        print("No new transcript to save.")
-
-def on_open(ws):
-    global is_transcribing
-    is_transcribing = True
-    print("WebSocket opened")
-    data = {
-        "action": "start",
-        "content-type": f"audio/l16;rate={RATE}",
-        "continuous": True,
-        "interim_results": True,
-        "word_confidence": True,
-        "timestamps": True,
-        "max_alternatives": 3
-    }
-    ws.send(json.dumps(data).encode('utf8'))
-    threading.Thread(target=read_audio, args=(ws,)).start()
+# Watson Speech to Text configuration
+REGION_MAP = {
+    'us-south': 'us-south.speech-to-text.watson.cloud.ibm.com'
+}
 
 def get_url():
     host = REGION_MAP["us-south"]
@@ -109,68 +30,81 @@ def get_auth():
     apikey = "Oogv4QFoAdBHL6kvvwnm-rOXAQfmSQFXvxHXWTGMUqfn"
     return ("apikey", apikey)
 
-@app.route('/')
-def index():
-    return send_from_directory(app.static_folder, 'index.html')
+def on_message(ws, msg):
+    global final_transcript
+    data = json.loads(msg)
+    if "results" in data:
+        transcript = data['results'][0]['alternatives'][0]['transcript']
+        transcription_queue.put(transcript)
+        if data["results"][0]["final"]:
+            final_transcript.append(transcript)
 
-@app.route('/start_transcription')
-def start_transcription():
-    global is_transcribing, final_transcript
-    is_transcribing = True
-    final_transcript = []  # Reset final transcript
+def on_error(ws, error):
+    print(f"WebSocket Error: {error}")
 
-    def generate():
-        headers = {}
-        userpass = ":".join(get_auth())
-        headers["Authorization"] = "Basic " + base64.b64encode(userpass.encode()).decode()
-        url = get_url()
-
-        ws = websocket.WebSocketApp(url,
-                                    header=headers,
-                                    on_message=on_message,
-                                    on_error=on_error,
-                                    on_close=on_close)
-        ws.on_open = on_open
-        
-        wst = threading.Thread(target=ws.run_forever, kwargs={"sslopt": {"cert_reqs": ssl.CERT_NONE}})
-        wst.daemon = True
-        wst.start()
-
-        while is_transcribing:
-            try:
-                transcript = transcription_queue.get(timeout=1)
-                yield f"data: {transcript}\n\n"
-            except queue.Empty:
-                yield f"data: \n\n"  # Keep connection alive
-
-    return Response(generate(), mimetype='text/event-stream')
-
-@app.route('/stop_transcription')
-def stop_transcription():
+def on_close(ws, close_status_code, close_msg):
     global is_transcribing
     is_transcribing = False
-    save_transcript()
-    return jsonify({"status": "Transcription stopped and saved"})
+    print(f"WebSocket closed. Status: {close_status_code}. Message: {close_msg}")
 
-@app.route('/get_final_transcript')
-def get_final_transcript():
-    save_transcript()  # Save any remaining transcript
-    if os.path.exists("transcript.txt"):
-        with open("transcript.txt", "r") as f:
-            transcript = f.read()
-        return jsonify({"transcript": transcript})
-    else:
-        return jsonify({"transcript": "No transcript available."})
+def on_open(ws):
+    global is_transcribing
+    is_transcribing = True
+    print("WebSocket opened")
+    data = {
+        "action": "start",
+        "content-type": "audio/l16;rate=44100",
+        "continuous": True,
+        "interim_results": True,
+        "max_alternatives": 3
+    }
+    ws.send(json.dumps(data).encode('utf8'))
 
-@app.route('/clear_transcript')
-def clear_transcript():
-    global final_transcript
-    final_transcript = []
-    if os.path.exists("transcript.txt"):
-        os.remove("transcript.txt")
-    return jsonify({"status": "Transcript cleared"})
+def start_transcription():
+    headers = {}
+    userpass = ":".join(get_auth())
+    headers["Authorization"] = "Basic " + base64.b64encode(userpass.encode()).decode()
+    url = get_url()
 
-# default "homepage", also needed for health check by Code Engine
+    ws = websocket.WebSocketApp(url,
+                                header=headers,
+                                on_message=on_message,
+                                on_error=on_error,
+                                on_close=on_close)
+    ws.on_open = on_open
+    
+    wst = threading.Thread(target=ws.run_forever, kwargs={"sslopt": {"cert_reqs": ssl.CERT_NONE}})
+    wst.daemon = True
+    wst.start()
+
+    return ws
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    data = request.json
+    intent = data.get('intent', {}).get('name', '')
+
+    if intent == 'Start Recording':
+        # Start transcription websocket
+        websocket_connection = start_transcription()
+        
+        # Collect transcript
+        try:
+            transcript = transcription_queue.get(timeout=10)
+            return jsonify({
+                "response": {
+                    "text": f"Transcription started. First words: {transcript}"
+                }
+            })
+        except queue.Empty:
+            return jsonify({
+                "response": {
+                    "text": "Transcription started, but no words detected yet."
+                }
+            })
+    
+    return jsonify({"response": {"text": "Unknown intent"}})
+    
 @app.get('/')
 def print_default():
     """ Greeting
@@ -178,7 +112,6 @@ def print_default():
     """
     # returning a dict equals to use jsonify()
     return {'message': 'This is the certifications API server'}
-
-
+    
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=8080, debug=False)
+    app.run(host='0.0.0.0', port=8080)
