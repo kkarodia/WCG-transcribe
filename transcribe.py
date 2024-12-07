@@ -81,6 +81,7 @@ def start_transcription():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
+    global is_transcribing, websocket_connection
     data = request.json
     intent = data.get('intent', {}).get('name', '')
 
@@ -88,20 +89,46 @@ def webhook():
         # Start transcription websocket
         websocket_connection = start_transcription()
         
-        # Collect transcript
-        try:
-            transcript = transcription_queue.get(timeout=10)
+        return jsonify({
+            "response": {
+                "text": "Transcription started."
+            }
+        })
+    
+    elif intent == 'Stop Recording':
+        if websocket_connection:
+            websocket_connection.close()
+            is_transcribing = False
+            
             return jsonify({
                 "response": {
-                    "text": f"Transcription started. First words: {transcript}"
+                    "text": "Transcription stopped."
                 }
             })
-        except queue.Empty:
+        
+        return jsonify({
+            "response": {
+                "text": "No active transcription to stop."
+            }
+        })
+    
+    elif intent == 'Get Transcript':
+        if final_transcript:
+            full_transcript = " ".join(final_transcript)
+            final_transcript.clear()  # Clear for next session
+            
             return jsonify({
                 "response": {
-                    "text": "Transcription started, but no words detected yet."
+                    "text": "Here's the transcript.",
+                    "transcript": full_transcript
                 }
             })
+        
+        return jsonify({
+            "response": {
+                "text": "No transcript available."
+            }
+        })
     
     return jsonify({"response": {"text": "Unknown intent"}})
     
