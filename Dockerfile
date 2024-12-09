@@ -4,7 +4,7 @@ FROM python:3.9-slim
 # Install system dependencies for PyAudio and build tools
 RUN apt-get update && apt-get install -y \
     portaudio19-dev \
-    python3-pyaudio \
+    libsndfile1-dev  \
     gcc \
     build-essential \
     libasound2-dev \
