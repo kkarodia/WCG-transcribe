@@ -41,14 +41,19 @@ def get_watson_credentials():
         'region': os.getenv('WATSON_REGION', 'us-south')
     }
 
-def get_url():
-    host = REGION_MAP["us-south"]
-    return (f"wss://api.{host}/instances/c68822b4-6c19-4501-8840-c51fd7cbbb36/v1/recognize"
+def get_url(credentials):
+    """
+    Generate WebSocket URL for Watson Speech to Text
+    """
+    host = REGION_MAP[credentials['region']]
+    return (f"wss://api.{host}/instances/{credentials['instance_id']}/v1/recognize"
             "?model=en-US_BroadbandModel")
 
-def get_auth():
-    apikey = "I9meB5ym-hSrrNCps6CvSyh_aFlDMNfj1k7497B7MeHf"
-    return ("apikey", apikey)
+def get_auth(credentials):
+    """
+    Get authentication credentials
+    """
+    return ("apikey", credentials['apikey'])
 
 def on_message(ws, msg):
     """
