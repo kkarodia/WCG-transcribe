@@ -4,6 +4,8 @@ import base64
 import threading
 import queue
 import ssl
+import wave
+import pyaudio
 import websocket
 import logging
 from typing import Optional
@@ -19,11 +21,21 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
+# Audio Recording Configuration
+CHUNK = 1024
+FORMAT = pyaudio.paInt16
+CHANNELS = 1
+RATE = 44100
+RECORD_SECONDS = 60  # Max recording time
+WAVE_OUTPUT_FILENAME = "output.wav"
+
 # Global variables
 transcription_queue = queue.Queue()
 final_transcript = []
 is_transcribing = False
 websocket_connection: Optional[websocket.WebSocketApp] = None
+audio_thread = None
+audio_queue = queue.Queue()
 
 # Watson Speech to Text configuration
 REGION_MAP = {
@@ -31,10 +43,6 @@ REGION_MAP = {
 }
 
 def get_watson_credentials():
-    """
-    Retrieve Watson Speech to Text credentials.
-    In a production environment, use secure credential management.
-    """
     return {
         'apikey': os.getenv('WATSON_APIKEY', 'I9meB5ym-hSrrNCps6CvSyh_aFlDMNfj1k7497B7MeHf'),
         'instance_id': os.getenv('WATSON_INSTANCE_ID', 'c68822b4-6c19-4501-8840-c51fd7cbbb36'),
@@ -42,23 +50,53 @@ def get_watson_credentials():
     }
 
 def get_url(credentials):
-    """
-    Generate WebSocket URL for Watson Speech to Text
-    """
     host = REGION_MAP[credentials['region']]
     return (f"wss://api.{host}/instances/{credentials['instance_id']}/v1/recognize"
             "?model=en-US_BroadbandModel")
 
 def get_auth(credentials):
-    """
-    Get authentication credentials
-    """
     return ("apikey", credentials['apikey'])
 
+def record_audio():
+    global is_transcribing
+    p = pyaudio.PyAudio()
+    stream = p.open(format=FORMAT,
+                    channels=CHANNELS,
+                    rate=RATE,
+                    input=True,
+                    frames_per_buffer=CHUNK)
+
+    logger.info("* Recording audio")
+    frames = []
+
+    while is_transcribing:
+        data = stream.read(CHUNK)
+        frames.append(data)
+        audio_queue.put(data)
+
+    logger.info("* Done recording")
+
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
+
+    # Save recorded audio
+    wf = wave.open(WAVE_OUTPUT_FILENAME, 'wb')
+    wf.setnchannels(CHANNELS)
+    wf.setsampwidth(p.get_sample_size(FORMAT))
+    wf.setframerate(RATE)
+    wf.writeframes(b''.join(frames))
+    wf.close()
+
+def send_audio_to_websocket(ws):
+    while is_transcribing:
+        try:
+            audio_chunk = audio_queue.get(timeout=1)
+            ws.send(audio_chunk)
+        except queue.Empty:
+            continue
+
 def on_message(ws, msg):
-    """
-    Process incoming WebSocket messages
-    """
     global final_transcript
     try:
         data = json.loads(msg)
@@ -77,7 +115,6 @@ def on_message(ws, msg):
                         final_transcript.append(transcript)
     except Exception as e:
         logger.error(f"Error processing WebSocket message: {e}")
-
 def on_error(ws, error):
     """
     Handle WebSocket errors
@@ -149,10 +186,7 @@ def start_transcription():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """
-    Handle webhook requests for transcription control
-    """
-    global is_transcribing, websocket_connection, final_transcript
+    global is_transcribing, websocket_connection, final_transcript, audio_thread
     
     try:
         data = request.json
@@ -163,11 +197,21 @@ def webhook():
             # Reset transcription state
             final_transcript.clear()
             transcription_queue.queue.clear()
+            audio_queue.queue.clear()
             
             # Start transcription websocket
             websocket_connection = start_transcription()
             
             if websocket_connection:
+                # Start audio recording in a separate thread
+                is_transcribing = True
+                audio_thread = threading.Thread(target=record_audio)
+                audio_thread.start()
+
+                # Start sending audio to WebSocket
+                send_thread = threading.Thread(target=send_audio_to_websocket, args=(websocket_connection,))
+                send_thread.start()
+                
                 return jsonify({
                     "response": {
                         "text": "Transcription started successfully."
@@ -179,24 +223,23 @@ def webhook():
                         "text": "Failed to start transcription."
                     }
                 }), 500
-        
-        elif intent == 'Stop Recording':
-            if websocket_connection:
-                websocket_connection.close()
-                is_transcribing = False
-                
-                return jsonify({
-                    "response": {
-                        "text": "Transcription stopped."
-                    }
-                })
-            
-            return jsonify({
-                "response": {
-                    "text": "No active transcription to stop."
-                }
-            })
-        
+            elif intent == 'Stop Recording':
+              if websocket_connection:
+                  websocket_connection.close()
+                  is_transcribing = False
+                  
+                  return jsonify({
+                      "response": {
+                          "text": "Transcription stopped."
+                      }
+                  })
+              
+              return jsonify({
+                  "response": {
+                      "text": "No active transcription to stop."
+                  }
+              })
+          
         elif intent == 'Get Transcript':
             logger.info(f"Retrieving transcript. Current state: {final_transcript}")
             
@@ -219,10 +262,10 @@ def webhook():
             })
         
         return jsonify({"response": {"text": "Unknown intent"}}), 400
-    
-    except Exception as e:
+      except Exception as e:
         logger.error(f"Webhook processing error: {e}")
         return jsonify({"response": {"text": "Internal server error"}}), 500
+
 
 @app.route('/', methods=['GET'])
 def health_check():
