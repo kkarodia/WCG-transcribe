@@ -13,14 +13,12 @@ RUN apt-get update && apt-get install -y \
 # Set the working directory in the container
 WORKDIR /app
 
+# Install Python dependencies
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
+
 # Copy the current directory contents into the container at /app
 COPY . /app
-
-# Update requirements.txt to use a different audio library
-RUN sed -i 's/pyaudio/sounddevice/g' requirements.txt
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
 
 # Expose the port the app runs on
 EXPOSE 8080
