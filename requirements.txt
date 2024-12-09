@@ -4,3 +4,4 @@ numpy
 websocket-client
 sounddevice
 wave
+scipy
