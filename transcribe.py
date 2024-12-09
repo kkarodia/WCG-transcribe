@@ -115,6 +115,7 @@ def on_message(ws, msg):
                         final_transcript.append(transcript)
     except Exception as e:
         logger.error(f"Error processing WebSocket message: {e}")
+
 def on_error(ws, error):
     """
     Handle WebSocket errors
@@ -223,23 +224,24 @@ def webhook():
                         "text": "Failed to start transcription."
                     }
                 }), 500
-            elif intent == 'Stop Recording':
-              if websocket_connection:
-                  websocket_connection.close()
-                  is_transcribing = False
-                  
-                  return jsonify({
-                      "response": {
-                          "text": "Transcription stopped."
-                      }
-                  })
-              
-              return jsonify({
-                  "response": {
-                      "text": "No active transcription to stop."
-                  }
-              })
-          
+        
+        elif intent == 'Stop Recording':
+            if websocket_connection:
+                websocket_connection.close()
+                is_transcribing = False
+                
+                return jsonify({
+                    "response": {
+                        "text": "Transcription stopped."
+                    }
+                })
+            
+            return jsonify({
+                "response": {
+                    "text": "No active transcription to stop."
+                }
+            })
+        
         elif intent == 'Get Transcript':
             logger.info(f"Retrieving transcript. Current state: {final_transcript}")
             
@@ -262,10 +264,10 @@ def webhook():
             })
         
         return jsonify({"response": {"text": "Unknown intent"}}), 400
-      except Exception as e:
+    
+    except Exception as e:
         logger.error(f"Webhook processing error: {e}")
         return jsonify({"response": {"text": "Internal server error"}}), 500
-
 
 @app.route('/', methods=['GET'])
 def health_check():
