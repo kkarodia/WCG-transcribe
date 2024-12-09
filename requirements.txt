@@ -1,7 +1,6 @@
 flask
 flask-cors
 numpy
-pyaudio
 websocket-client
 sounddevice
 wave
