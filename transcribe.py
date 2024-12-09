@@ -36,8 +36,8 @@ def get_watson_credentials():
     In a production environment, use secure credential management.
     """
     return {
-        'apikey': os.getenv('WATSON_APIKEY', 'Oogv4QFoAdBHL6kvvwnm-rOXAQfmSQFXvxHXWTGMUqfn'),
-        'instance_id': os.getenv('WATSON_INSTANCE_ID', '57f91e09-9377-4a74-a1d2-43230edf7829'),
+        'apikey': os.getenv('WATSON_APIKEY', 'I9meB5ym-hSrrNCps6CvSyh_aFlDMNfj1k7497B7MeHf'),
+        'instance_id': os.getenv('WATSON_INSTANCE_ID', 'c68822b4-6c19-4501-8840-c51fd7cbbb36'),
         'region': os.getenv('WATSON_REGION', 'us-south')
     }
 
