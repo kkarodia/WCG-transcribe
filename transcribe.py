@@ -23,11 +23,11 @@ REGION_MAP = {
 
 def get_url():
     host = REGION_MAP["us-south"]
-    return (f"wss://api.{host}/instances/57f91e09-9377-4a74-a1d2-43230edf7829/v1/recognize"
+    return (f"wss://api.{host}/instances/c68822b4-6c19-4501-8840-c51fd7cbbb36/v1/recognize"
             "?model=en-US_BroadbandModel")
 
 def get_auth():
-    apikey = "Oogv4QFoAdBHL6kvvwnm-rOXAQfmSQFXvxHXWTGMUqfn"
+    apikey = "I9meB5ym-hSrrNCps6CvSyh_aFlDMNfj1k7497B7MeHf"
     return ("apikey", apikey)
 
 def on_message(ws, msg):
