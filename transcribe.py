@@ -4,8 +4,10 @@ import base64
 import threading
 import queue
 import ssl
-import wave
-import pyaudio
+import io
+import sounddevice as sd
+import numpy as np
+import scipy.io.wavfile as wavfile
 import websocket
 import logging
 from typing import Optional
@@ -22,10 +24,8 @@ app = Flask(__name__)
 CORS(app)
 
 # Audio Recording Configuration
-CHUNK = 1024
-FORMAT = pyaudio.paInt16
+SAMPLE_RATE = 44100
 CHANNELS = 1
-RATE = 44100
 RECORD_SECONDS = 60  # Max recording time
 WAVE_OUTPUT_FILENAME = "output.wav"
 
@@ -36,6 +36,7 @@ is_transcribing = False
 websocket_connection: Optional[websocket.WebSocketApp] = None
 audio_thread = None
 audio_queue = queue.Queue()
+recorded_audio = []
 
 # Watson Speech to Text configuration
 REGION_MAP = {
@@ -57,42 +58,45 @@ def get_url(credentials):
 def get_auth(credentials):
     return ("apikey", credentials['apikey'])
 
+def audio_callback(indata, frames, time, status):
+    """
+    Callback function to handle audio recording
+    """
+    if status:
+        logger.warning(f"Audio recording status: {status}")
+    
+    audio_queue.put(indata.copy())
+    recorded_audio.append(indata.copy())
+
 def record_audio():
-    global is_transcribing
-    p = pyaudio.PyAudio()
-    stream = p.open(format=FORMAT,
-                    channels=CHANNELS,
-                    rate=RATE,
-                    input=True,
-                    frames_per_buffer=CHUNK)
-
-    logger.info("* Recording audio")
-    frames = []
-
-    while is_transcribing:
-        data = stream.read(CHUNK)
-        frames.append(data)
-        audio_queue.put(data)
-
-    logger.info("* Done recording")
-
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
-
+    global is_transcribing, recorded_audio
+    
+    # Reset recorded audio
+    recorded_audio = []
+    
+    logger.info("* Starting audio recording")
+    
+    # Use sounddevice for recording
+    with sd.InputStream(callback=audio_callback, 
+                        channels=CHANNELS, 
+                        samplerate=SAMPLE_RATE):
+        while is_transcribing:
+            sd.sleep(100)  # Small delay to prevent CPU overuse
+    
+    logger.info("* Stopping audio recording")
+    
     # Save recorded audio
-    wf = wave.open(WAVE_OUTPUT_FILENAME, 'wb')
-    wf.setnchannels(CHANNELS)
-    wf.setsampwidth(p.get_sample_size(FORMAT))
-    wf.setframerate(RATE)
-    wf.writeframes(b''.join(frames))
-    wf.close()
+    if recorded_audio:
+        audio_data = np.concatenate(recorded_audio)
+        wavfile.write(WAVE_OUTPUT_FILENAME, SAMPLE_RATE, audio_data)
 
 def send_audio_to_websocket(ws):
     while is_transcribing:
         try:
             audio_chunk = audio_queue.get(timeout=1)
-            ws.send(audio_chunk)
+            # Convert numpy array to bytes
+            audio_bytes = audio_chunk.tobytes()
+            ws.send(audio_bytes)
         except queue.Empty:
             continue
 
@@ -117,25 +121,16 @@ def on_message(ws, msg):
         logger.error(f"Error processing WebSocket message: {e}")
 
 def on_error(ws, error):
-    """
-    Handle WebSocket errors
-    """
     logger.error(f"WebSocket Error: {error}")
     global is_transcribing
     is_transcribing = False
 
 def on_close(ws, close_status_code, close_msg):
-    """
-    Handle WebSocket closure
-    """
     global is_transcribing
     is_transcribing = False
     logger.info(f"WebSocket closed. Status: {close_status_code}. Message: {close_msg}")
 
 def on_open(ws):
-    """
-    Configure WebSocket when opened
-    """
     global is_transcribing
     is_transcribing = True
     logger.info("WebSocket opened")
@@ -151,9 +146,6 @@ def on_open(ws):
     ws.send(json.dumps(data).encode('utf8'))
 
 def start_transcription():
-    """
-    Start WebSocket transcription
-    """
     try:
         credentials = get_watson_credentials()
         
